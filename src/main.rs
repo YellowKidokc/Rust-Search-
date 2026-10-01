@@ -4,7 +4,9 @@ mod model;
 mod parsers;
 mod query;
 mod saved;
+mod server;
 mod store;
+mod watch;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use model::SearchResult;
@@ -26,6 +28,8 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Index {
+        #[arg(long)]
+        name: Option<String>,
         #[arg(required = true)]
         paths: Vec<PathBuf>,
     },
@@ -34,11 +38,31 @@ enum Command {
         #[arg(long)]
         index: Option<PathBuf>,
     },
+    /// List centrally stored named indexes.
+    Indexes,
+    /// Re-index automatically when a supported file changes.
+    Watch {
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        index: Option<PathBuf>,
+    },
+    /// Serve the local browser interface.
+    Serve {
+        #[arg(long, default_value_t = 9800)]
+        port: u16,
+        #[arg(long)]
+        index_name: Option<String>,
+        #[arg(long)]
+        index: Option<PathBuf>,
+    },
 }
 #[derive(Args, Debug, Clone)]
 struct QueryArgs {
     #[arg(long)]
     index: Option<PathBuf>,
+    #[arg(long)]
+    index_name: Option<String>,
     #[arg(long)]
     tag: Option<String>,
     #[arg(long)]
@@ -105,6 +129,8 @@ struct QueryArgs {
     export_manifest: Option<PathBuf>,
     #[arg(long)]
     export_csv: Option<PathBuf>,
+    #[arg(long)]
+    export_snippets: Option<PathBuf>,
 }
 impl QueryArgs {
     fn query(&self) -> Query {
@@ -135,10 +161,11 @@ impl QueryArgs {
         }
     }
 }
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     match Cli::parse().command {
-        Command::Index { paths } => {
-            let (base, s) = indexer::run(&paths)?;
+        Command::Index { paths, name } => {
+            let (base, s) = indexer::run(&paths, name.as_deref())?;
             println!(
                 "Index: {}\nAdded: {}, updated: {}, unchanged: {}, removed: {}, failed: {}",
                 base.join("index.json").display(),
@@ -151,18 +178,42 @@ fn main() -> Result<()> {
         }
         Command::Query(a) => run_query(a)?,
         Command::Repl { index } => repl(index)?,
+        Command::Indexes => {
+            for i in store::list_named()? {
+                println!(
+                    "{}\t{} records\t{}\t{}",
+                    i.name,
+                    i.record_count,
+                    i.indexed_at.as_deref().unwrap_or("unknown"),
+                    i.roots.join(", ")
+                );
+            }
+        }
+        Command::Watch { name, index } => watch::run(name, index)?,
+        Command::Serve {
+            port,
+            index_name,
+            index,
+        } => server::serve(port, index_name, index).await?,
     }
     Ok(())
 }
 fn run_query(a: QueryArgs) -> Result<()> {
-    let base = store::find_base(a.index.as_deref())?;
+    let base = match a.index_name.as_deref() {
+        Some(n) if n != "all" => store::named_base(n)?,
+        Some(_) => store::home()?,
+        None => store::find_base(a.index.as_deref())?,
+    };
     if a.list_saved {
         for n in saved::list(&base)? {
             println!("{n}")
         }
         return Ok(());
     }
-    let index = store::load(&base)?;
+    let index = match a.index_name.as_deref() {
+        Some(n) => store::load_named(n)?,
+        None => store::load(&base)?,
+    };
     let (mut q, results) = if let Some(name) = &a.load {
         let s = saved::load(&base, name)?;
         let r = if a.frozen {
@@ -198,6 +249,7 @@ fn run_query(a: QueryArgs) -> Result<()> {
         || a.export_to.is_some()
         || a.export_manifest.is_some()
         || a.export_csv.is_some()
+        || a.export_snippets.is_some()
     {
         results.clone()
     } else {
@@ -211,6 +263,9 @@ fn run_query(a: QueryArgs) -> Result<()> {
     }
     if let Some(p) = a.export_csv {
         export::csv(&selected, &p)?
+    }
+    if let Some(p) = a.export_snippets {
+        export::snippets(&selected, &q, &p)?
     }
     Ok(())
 }

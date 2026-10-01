@@ -1,7 +1,6 @@
 use crate::{
     model::{Index, IndexRecord},
-    parsers::markdown,
-    store,
+    parsers, store,
 };
 use anyhow::{Context, Result};
 use std::{
@@ -18,12 +17,15 @@ pub struct Stats {
     pub removed: usize,
     pub failed: usize,
 }
-pub fn run(roots: &[PathBuf]) -> Result<(PathBuf, Stats)> {
+pub fn run(roots: &[PathBuf], name: Option<&str>) -> Result<(PathBuf, Stats)> {
     anyhow::ensure!(!roots.is_empty(), "at least one path is required");
     for p in roots {
         anyhow::ensure!(p.exists(), "path does not exist: {}", p.display());
     }
-    let base = store::base_for_root(&roots[0]);
+    let base = match name {
+        Some(n) => store::named_base(n)?,
+        None => store::base_for_root(&roots[0]),
+    };
     let old = store::load(&base).unwrap_or_default();
     let mut prior: HashMap<String, IndexRecord> = old
         .records
@@ -40,7 +42,7 @@ pub fn run(roots: &[PathBuf]) -> Result<(PathBuf, Stats)> {
         failed: 0,
     };
     for root in roots {
-        for path in markdown_paths(root) {
+        for path in supported_paths(root) {
             let canonical = path.canonicalize().unwrap_or(path.clone());
             let key = canonical.to_string_lossy().into_owned();
             if !seen.insert(key.clone()) {
@@ -56,7 +58,7 @@ pub fn run(roots: &[PathBuf]) -> Result<(PathBuf, Stats)> {
                 st.unchanged += 1;
                 continue;
             }
-            match markdown::parse(&path) {
+            match parse_path(&path) {
                 Ok(r) => {
                     if prior.remove(&key).is_some() {
                         st.updated += 1
@@ -86,28 +88,86 @@ pub fn run(roots: &[PathBuf]) -> Result<(PathBuf, Stats)> {
                 .into_owned()
         })
         .collect();
-    store::save(&base, &Index { roots, records })?;
+    store::save(
+        &base,
+        &Index {
+            roots,
+            records,
+            name: name.map(str::to_owned),
+            indexed_at: Some(chrono::Utc::now().to_rfc3339()),
+            record_indexes: HashMap::new(),
+        },
+    )?;
     Ok((base, st))
 }
-fn markdown_paths(root: &Path) -> Vec<PathBuf> {
+pub fn is_supported(path: &Path) -> bool {
+    path.extension().and_then(|x| x.to_str()).is_some_and(|x| {
+        matches!(
+            x.to_ascii_lowercase().as_str(),
+            "md" | "txt" | "json" | "yaml" | "yml" | "pdf" | "docx" | "html" | "htm"
+        )
+    })
+}
+pub fn parse_path(path: &Path) -> Result<IndexRecord> {
+    match path
+        .extension()
+        .and_then(|x| x.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "md" => parsers::markdown::parse(path),
+        "txt" => parsers::text::parse(path),
+        "json" => parsers::json::parse(path),
+        "yaml" | "yml" => parsers::yaml::parse(path),
+        "pdf" => parsers::pdf::parse(path),
+        "docx" => parsers::docx::parse(path),
+        "html" | "htm" => parsers::html::parse(path),
+        _ => anyhow::bail!("unsupported file: {}", path.display()),
+    }
+}
+fn supported_paths(root: &Path) -> Vec<PathBuf> {
     if root.is_file() {
-        return (root
-            .extension()
-            .is_some_and(|x| x.eq_ignore_ascii_case("md")))
-        .then(|| root.to_owned())
-        .into_iter()
-        .collect();
+        return is_supported(root)
+            .then(|| root.to_owned())
+            .into_iter()
+            .collect();
     }
     WalkDir::new(root)
         .into_iter()
         .filter_entry(|e| e.file_name() != ".tpsearch")
         .filter_map(Result::ok)
-        .filter(|e| {
-            e.file_type().is_file()
-                && e.path()
-                    .extension()
-                    .is_some_and(|x| x.eq_ignore_ascii_case("md"))
-        })
+        .filter(|e| e.file_type().is_file() && is_supported(e.path()))
         .map(|e| e.into_path())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn indexes_markdown_text_and_json() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.md"), "---\ntitle: Markdown\n---\nalpha").unwrap();
+        std::fs::write(dir.path().join("b.txt"), "plain beta").unwrap();
+        std::fs::write(
+            dir.path().join("c.json"),
+            r#"{"title":"JSON title","score_total":72,"note":"gamma"}"#,
+        )
+        .unwrap();
+        let (_, stats) = run(&[dir.path().to_owned()], None).unwrap();
+        let index = store::load(&dir.path().join(".tpsearch")).unwrap();
+        assert_eq!(stats.added, 3);
+        assert_eq!(index.records.len(), 3);
+        assert!(index
+            .records
+            .iter()
+            .any(|r| r.title.as_deref() == Some("JSON title") && r.score_total == Some(72)));
+        let q = crate::query::Query {
+            search: Some("beta".into()),
+            limit: 10,
+            ..Default::default()
+        };
+        assert_eq!(crate::query::execute(&index, &q).len(), 1);
+    }
 }
