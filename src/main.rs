@@ -1,9 +1,16 @@
+mod cli;
+mod config;
+mod db;
 mod export;
+mod extract;
 mod indexer;
 mod model;
 mod parsers;
 mod query;
+mod report;
 mod saved;
+mod scan;
+mod search;
 mod store;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -20,14 +27,73 @@ use std::{
     about = "Local structured-document search engine"
 )]
 struct Cli {
+    /// Collection settings file (default: per-user config dir, or $TPSEARCH_CONFIG).
+    #[arg(long, global = true)]
+    config: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Index a collection (`-c NAME`), or legacy: index Markdown paths into <root>/.tpsearch.
     Index {
-        #[arg(required = true)]
         paths: Vec<PathBuf>,
+        #[arg(short, long)]
+        collection: Option<String>,
+        /// Inventory only: show what would be indexed; writes nothing.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Manage named collections and their settings.
+    #[command(subcommand, alias = "col")]
+    Collection(cli::CollectionCmd),
+    /// Full-text passage search over one or more collections.
+    Search(cli::SearchArgs),
+    /// Roots (online/offline), file states, failures, recent runs.
+    Status {
+        #[arg(short, long)]
+        collection: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Pause a running index of a collection (workers wait between files).
+    Pause {
+        #[arg(short, long)]
+        collection: String,
+    },
+    Resume {
+        #[arg(short, long)]
+        collection: String,
+    },
+    /// Re-index incrementally every interval (scheduled/watched modes).
+    Watch {
+        #[arg(short, long)]
+        collection: String,
+        /// Minutes; defaults to the collection's interval_minutes.
+        #[arg(long)]
+        interval: Option<u64>,
+    },
+    /// Open the source of a search hit at its location.
+    Open {
+        #[arg(short, long)]
+        collection: String,
+        passage_id: i64,
+        /// Only print the location.
+        #[arg(long)]
+        print: bool,
+    },
+    /// Export the documented folder-report JSON for a folder (or tree).
+    ExportFolder {
+        #[arg(short, long)]
+        collection: String,
+        folder: String,
+        #[arg(long)]
+        recursive: bool,
+        /// File (single folder) or directory (--recursive). Default: stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
     Query(QueryArgs),
     Repl {
@@ -136,8 +202,23 @@ impl QueryArgs {
     }
 }
 fn main() -> Result<()> {
-    match Cli::parse().command {
-        Command::Index { paths } => {
+    let cli = Cli::parse();
+    let cfg_path = config::config_path(cli.config.as_deref())?;
+    match cli.command {
+        Command::Index {
+            collection: Some(name),
+            dry_run,
+            json,
+            paths,
+        } => {
+            anyhow::ensure!(paths.is_empty(), "use either -c NAME or paths, not both");
+            cli::index(&cfg_path, &name, dry_run, json)?
+        }
+        Command::Index { paths, .. } => {
+            anyhow::ensure!(
+                !paths.is_empty(),
+                "pass -c COLLECTION, or one or more paths for the legacy Markdown index"
+            );
             let (base, s) = indexer::run(&paths)?;
             println!(
                 "Index: {}\nAdded: {}, updated: {}, unchanged: {}, removed: {}, failed: {}",
@@ -151,6 +232,26 @@ fn main() -> Result<()> {
         }
         Command::Query(a) => run_query(a)?,
         Command::Repl { index } => repl(index)?,
+        Command::Collection(c) => cli::collection(&cfg_path, c)?,
+        Command::Search(a) => cli::search(&cfg_path, a)?,
+        Command::Status { collection, json } => cli::status(&cfg_path, &collection, json)?,
+        Command::Pause { collection } => cli::pause(&cfg_path, &collection, true)?,
+        Command::Resume { collection } => cli::pause(&cfg_path, &collection, false)?,
+        Command::Watch {
+            collection,
+            interval,
+        } => cli::watch(&cfg_path, &collection, interval)?,
+        Command::Open {
+            collection,
+            passage_id,
+            print,
+        } => cli::open(&cfg_path, &collection, passage_id, print)?,
+        Command::ExportFolder {
+            collection,
+            folder,
+            recursive,
+            out,
+        } => cli::export_folder(&cfg_path, &collection, &folder, recursive, out)?,
     }
     Ok(())
 }
@@ -252,6 +353,7 @@ fn repl(index: Option<PathBuf>) -> Result<()> {
         match Cli::try_parse_from(argv) {
             Ok(Cli {
                 command: Command::Query(mut q),
+                ..
             }) => {
                 if q.index.is_none() {
                     q.index = index.clone()
