@@ -67,7 +67,7 @@ pub fn parse(path: &Path) -> Result<IndexRecord> {
     })
 }
 
-fn split_frontmatter(text: &str) -> (&str, &str) {
+pub(crate) fn split_frontmatter(text: &str) -> (&str, &str) {
     let mut lines = text.split_inclusive('\n');
     let Some(first) = lines.next() else {
         return ("", text);

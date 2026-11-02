@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>David-OS Search</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2a323d;
+    --ink:#e6edf3; --dim:#9aa7b4; --faint:#6b7684;
+    --accent:#4ea1ff; --accent2:#7c5cff; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+    --chip:#222b36; --hl:#4ea1ff33; color-scheme:dark;
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#f6f8fa; --panel:#fff; --panel2:#f0f3f6; --line:#d8dee4;
+      --ink:#1f2328; --dim:#57606a; --faint:#8c959f; --accent:#0969da; --accent2:#6639ba;
+      --chip:#eaeef2; --hl:#0969da22; color-scheme:light;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2a323d;
+    --ink:#e6edf3; --dim:#9aa7b4; --faint:#6b7684; --accent:#4ea1ff; --chip:#222b36; --hl:#4ea1ff33; color-scheme:dark;
+  }
+  :root[data-theme="light"]{
+    --bg:#f6f8fa; --panel:#fff; --panel2:#f0f3f6; --line:#d8dee4;
+    --ink:#1f2328; --dim:#57606a; --faint:#8c959f; --accent:#0969da; --chip:#eaeef2; --hl:#0969da22; color-scheme:light;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:14px 20px; border-bottom:1px solid var(--line); background:var(--panel);
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap}
+  .logo{font-weight:700; font-size:16px}
+  .logo .sub{color:var(--faint); font-weight:400; font-size:12px; margin-left:8px}
+  .spacer{flex:1}
+  button,select,input{font:inherit; color:var(--ink)}
+  button{cursor:pointer; border:1px solid var(--line); background:var(--panel2); padding:7px 13px; border-radius:7px}
+  button:hover{border-color:var(--accent); color:var(--accent)}
+  button.primary{background:var(--accent); color:#fff; border-color:var(--accent)}
+  button.primary:hover{filter:brightness(1.1); color:#fff}
+  button.ghost{background:transparent}
+  input[type=text],input[type=date],input[type=number],select{background:var(--panel2); border:1px solid var(--line);
+    padding:7px 10px; border-radius:7px; min-width:0}
+  .tabs{display:flex; gap:4px; padding:10px 20px 0; flex-wrap:wrap}
+  .tab{padding:7px 14px; border-radius:7px 7px 0 0; border:1px solid transparent; color:var(--dim); cursor:pointer; font-size:13px}
+  .tab.active{color:var(--ink); background:var(--panel); border-color:var(--line); border-bottom-color:var(--panel)}
+  main{padding:0 20px 20px}
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:0 10px 10px 10px}
+  .searchrow{display:flex; gap:8px; padding:14px; border-bottom:1px solid var(--line); flex-wrap:wrap}
+  .searchrow input#q{flex:1; min-width:220px; font-size:15px}
+  .opts{display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:10px 14px; padding:12px 14px; border-bottom:1px solid var(--line)}
+  .opts label{display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--faint)}
+  .opts label.check{flex-direction:row; align-items:center; gap:7px; color:var(--dim); font-size:13px}
+  .modehint{padding:8px 14px; font-size:12px; color:var(--dim); border-bottom:1px solid var(--line); background:var(--panel2)}
+  .exportbar{display:flex; gap:8px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line); flex-wrap:wrap}
+  .exportbar b{font-size:12px; color:var(--faint); text-transform:uppercase; letter-spacing:.4px}
+  .summary{padding:10px 14px; font-size:12px; color:var(--dim)}
+  .err{color:var(--bad)}
+  .hit{padding:12px 14px; border-top:1px solid var(--line); display:grid; grid-template-columns:22px 1fr; gap:10px}
+  .hit:hover{background:var(--panel2)}
+  .hit .path{font-family:ui-monospace,Consolas,monospace; font-size:12px; color:var(--accent); word-break:break-all; text-decoration:none}
+  .hit .meta{font-size:11px; color:var(--faint); margin-top:2px; display:flex; gap:8px; flex-wrap:wrap}
+  .hit .text{margin-top:6px; white-space:pre-wrap; word-break:break-word}
+  .hit .ctx{color:var(--faint)}
+  mark{background:var(--hl); color:inherit; border-radius:3px; padding:0 1px}
+  .pill{font-size:11px; padding:1px 8px; border-radius:20px; background:var(--chip); border:1px solid var(--line)}
+  .pill.ts{color:var(--accent2); border-color:var(--accent2); font-family:ui-monospace,Consolas,monospace}
+  .pill.warn{color:var(--warn); border-color:var(--warn)}
+  .files{padding:10px 14px; border-top:1px solid var(--line); font-size:12px}
+  .files a{color:var(--accent); font-family:ui-monospace,Consolas,monospace}
+  pre.report{margin:0; padding:14px; overflow:auto; max-height:70vh; font-size:12px}
+  @media (max-width:600px){ header,main,.tabs{padding-left:16px; padding-right:16px} }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">David-OS <span class="sub">Search · tpsearch</span></div>
+  <div class="spacer"></div>
+  <select id="coll" title="collection"></select>
+  <button class="ghost" id="themeBtn" title="toggle theme">◐</button>
+</header>
+
+<div class="tabs" id="tabs"></div>
+
+<main>
+  <div class="panel">
+    <div class="modehint" id="modeHint"></div>
+    <div id="searchUI">
+      <form class="searchrow" id="form">
+        <input type="text" id="q" placeholder='keywords, "exact phrase", -exclude, prefix*' autocomplete="off">
+        <button class="primary" type="submit">Search</button>
+      </form>
+      <div class="opts" id="opts"></div>
+      <div class="exportbar" id="exportbar"></div>
+      <div class="summary" id="summary"></div>
+      <div id="results"></div>
+    </div>
+    <div id="folderUI" hidden>
+      <form class="searchrow" id="folderForm">
+        <input type="text" id="folder" placeholder="folder path inside the collection, e.g. D:\Notes\Books" style="flex:1;min-width:220px">
+        <button class="primary" type="submit">Build report</button>
+        <button type="button" id="folderSave">Save JSON</button>
+      </form>
+      <div class="summary" id="folderSummary"></div>
+      <pre class="report" id="folderOut"></pre>
+    </div>
+  </div>
+</main>
+
+<script>
+/* ============================================================
+   One search core, many modes. Every mode posts the same request
+   shape to /api/search (served by `tpsearch serve`); a mode only
+   changes default filters, which options it shows, how a hit is
+   rendered and which export formats it offers.
+   ============================================================ */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* shared options, available in every search mode */
+const COMMON_OPTS = [
+  {id:"phrase", type:"check", label:"exact phrase"},
+  {id:"any", type:"check", label:"match any term"},
+  {id:"path", type:"text", label:"path contains"},
+  {id:"under", type:"text", label:"only under folder"},
+  {id:"after", type:"date", label:"modified after"},
+  {id:"before", type:"date", label:"modified before"},
+  {id:"limit", type:"number", label:"max results", value:20},
+  {id:"include_missing", type:"check", label:"include missing files"},
+];
+
+const MODES = {
+  all: {
+    label:"Everything",
+    hint:"Full-text passage search across every extracted file type.",
+    opts:[{id:"types", type:"text", label:"file types (md,txt,pdf…)"},
+          {id:"representation", type:"select", label:"representation", options:["","original","copy","transcript","derived"]},
+          {id:"meta", type:"text", label:"metadata key=value"}],
+    exports:["csv","json","markdown","paths"],
+  },
+  docs: {
+    label:"Documents",
+    hint:"Notes, papers and documents. Defaults to originals only, with section headings shown.",
+    fixed:{representation:"original"},
+    opts:[{id:"types", type:"text", label:"file types", value:"md,txt,docx,html,pdf"},
+          {id:"meta", type:"text", label:"front-matter key=value"}],
+    exports:["csv","json","markdown","citations","paths"],
+  },
+  youtube: {
+    label:"YouTube / Transcripts",
+    hint:"Searches subtitle/transcript files (.srt, .vtt). Hits show timestamps; exports can include timestamped links.",
+    fixed:{representation:"transcript"},
+    opts:[{id:"types", type:"text", label:"transcript types", value:"srt,vtt"},
+          {id:"ytid", type:"text", label:"YouTube video ID or URL (for links)"},
+          {id:"channel", type:"text", label:"channel / metadata key=value"},
+          {id:"pad", type:"number", label:"start link N sec earlier", value:3}],
+    exports:["timestamps","youtube-links","csv","json","srt-clips"],
+  },
+  folder: {
+    label:"Folder report",
+    hint:"Export a provenance report for one folder (same data as `tpsearch export-folder`).",
+  },
+};
+
+const EXPORT_LABEL = {csv:"CSV", json:"JSON", markdown:"Markdown", citations:"Citations (.md)", paths:"File list",
+  timestamps:"Timestamp list", "youtube-links":"YouTube links", "srt-clips":"Clips (.srt)"};
+
+let MODE = "all", LAST = null;
+
+/* ---------- tabs + options ---------- */
+function buildTabs(){
+  $("#tabs").innerHTML = Object.entries(MODES).map(([k,m]) =>
+    `<div class="tab${k===MODE?" active":""}" data-mode="${k}">${m.label}</div>`).join("");
+  document.querySelectorAll(".tab").forEach(t => t.onclick = () => { MODE = t.dataset.mode; LAST = null; buildTabs(); buildMode(); });
+}
+function field(o){
+  const id = "o_"+o.id;
+  if(o.type==="check") return `<label class="check"><input type="checkbox" id="${id}"> ${o.label}</label>`;
+  if(o.type==="select") return `<label>${o.label}<select id="${id}">${o.options.map(v=>`<option value="${v}">${v||"any"}</option>`).join("")}</select></label>`;
+  return `<label>${o.label}<input type="${o.type}" id="${id}" value="${esc(o.value ?? "")}"></label>`;
+}
+function buildMode(){
+  const m = MODES[MODE];
+  $("#modeHint").textContent = m.hint;
+  const folder = MODE==="folder";
+  $("#searchUI").hidden = folder; $("#folderUI").hidden = !folder;
+  if(folder) return;
+  $("#opts").innerHTML = [...m.opts, ...COMMON_OPTS].map(field).join("");
+  $("#exportbar").innerHTML = `<b>Export</b>` + m.exports.map(e => `<button type="button" data-exp="${e}">${EXPORT_LABEL[e]}</button>`).join("")
+    + `<span class="spacer"></span><label class="check" style="font-size:12px;color:var(--dim)"><input type="checkbox" id="selOnly"> selected only</label>`;
+  document.querySelectorAll("[data-exp]").forEach(b => b.onclick = () => doExport(b.dataset.exp));
+  $("#summary").textContent = ""; $("#results").innerHTML = "";
+}
+const val = id => { const e = $("#o_"+id); return !e ? undefined : e.type==="checkbox" ? e.checked : e.value.trim(); };
+
+/* ---------- the one search core ---------- */
+function buildRequest(){
+  const m = MODES[MODE];
+  const meta = [val("meta"), val("channel")].filter(Boolean);
+  return {
+    collections: $("#coll").value ? [$("#coll").value] : [],
+    query: $("#q").value,
+    phrase: !!val("phrase"), any: !!val("any"),
+    types: (val("types")||"").split(",").map(s=>s.trim().replace(/^\./,"")).filter(Boolean),
+    path: val("path")||null, under: val("under")||null,
+    after: val("after")||null, before: val("before")||null,
+    meta,
+    representation: (m.fixed && m.fixed.representation) || val("representation") || null,
+    limit: parseInt(val("limit"))||20,
+    include_missing: !!val("include_missing"),
+  };
+}
+async function api(path, body){
+  const r = await fetch(path, body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {});
+  const j = await r.json();
+  if(!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+async function runSearch(e){
+  e && e.preventDefault();
+  $("#summary").textContent = "Searching…"; $("#results").innerHTML = "";
+  try{
+    const sets = await api("/api/search", buildRequest());
+    LAST = sets.flatMap(s => s.hits);
+    const files = sets.flatMap(s => s.file_matches);
+    const p = sets.reduce((a,s)=>a+s.matching_passages,0), f = sets.reduce((a,s)=>a+s.matching_files,0),
+          ind = sets.reduce((a,s)=>a+s.independent_sources,0);
+    $("#summary").innerHTML = `${p} passages in ${f} files (${ind} independent sources) · showing ${LAST.length}`
+      + ` · <span style="color:var(--faint)">${esc(sets[0]?.relevance_note)}</span>`;
+    $("#results").innerHTML = LAST.map((h,i)=>renderHit(h,i)).join("")
+      + (files.length ? `<div class="files"><b>Filename matches:</b> ${files.map(x=>`<div><a href="${esc(x.uri)}">${esc(x.path)}</a></div>`).join("")}</div>` : "");
+  }catch(err){ $("#summary").innerHTML = `<span class="err">${esc(err.message)}</span>`; LAST = null; }
+}
+function highlight(text, terms){
+  let s = esc(text);
+  for(const t of terms||[]){
+    const w = t.replace(/[*"]/g,"").trim(); if(w.length<2) continue;
+    s = s.replace(new RegExp(`(${w.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")})`,"gi"), "<mark>$1</mark>");
+  }
+  return s;
+}
+function renderHit(h,i){
+  const L = h.location, yt = MODE==="youtube";
+  const where = yt && L.t_start ? `<span class="pill ts">${esc(L.t_start)}${L.t_end?" → "+esc(L.t_end):""}</span>`
+    : L.section ? `<span class="pill">§ ${esc(L.section)}</span>` : L.page ? `<span class="pill">p. ${L.page}</span>` : "";
+  const ytLink = yt && L.t_start && videoId() ? ` · <a href="${esc(ytUrl(L.t_start))}" target="_blank">▶ open at ${esc(L.t_start)}</a>` : "";
+  const ctx = !yt && (h.context_before || h.context_after);
+  return `<div class="hit"><input type="checkbox" class="sel" data-i="${i}">
+    <div><a class="path" href="${esc(h.uri)}">${esc(h.rel_path || h.path)}</a>${ytLink}
+      <div class="meta">${where}<span>${esc(h.collection)}</span><span>.${esc(h.ext)}</span><span>${esc(h.modified)}</span>
+        <span>${esc(h.representation)}</span><span>matched in ${esc(h.matched_in)}</span>
+        ${h.copies.length?`<span class="pill">${h.copies.length} copies</span>`:""}
+        ${h.file_status!=="ok"&&h.file_status!=="indexed"?`<span class="pill warn">${esc(h.file_status)}</span>`:""}
+        ${/changed|not/.test(h.quote_check)?`<span class="pill warn">${esc(h.quote_check)}</span>`:""}</div>
+      <div class="text">${ctx&&h.context_before?`<span class="ctx">${esc(h.context_before)}\n</span>`:""}${highlight(h.text,h.matched_terms)}${ctx&&h.context_after?`<span class="ctx">\n${esc(h.context_after)}</span>`:""}</div>
+    </div></div>`;
+}
+
+/* ---------- YouTube helpers ---------- */
+function videoId(){
+  const v = val("ytid")||""; const m = v.match(/(?:v=|youtu\.be\/|shorts\/)([\w-]{11})/);
+  return m ? m[1] : /^[\w-]{11}$/.test(v) ? v : "";
+}
+function secs(ts){ const p = ts.replace(",",".").split(":").map(Number); return Math.floor(p.reduce((a,x)=>a*60+x,0)); }
+function ytUrl(ts){ return `https://youtu.be/${videoId()}?t=${Math.max(0, secs(ts) - (parseInt(val("pad"))||0))}`; }
+
+/* ---------- exports (mode-specific formats, same hit data) ---------- */
+function chosen(){
+  if(!LAST) return [];
+  const sel = [...document.querySelectorAll(".sel:checked")].map(c=>LAST[c.dataset.i]);
+  return $("#selOnly")?.checked ? sel : LAST;
+}
+function save(name, text, type="text/plain"){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], {type})); a.download = name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+const csvCell = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
+function doExport(kind){
+  const hits = chosen();
+  if(!hits.length){ alert("Run a search first (or select some results)."); return; }
+  const q = $("#q").value.replace(/[^\w-]+/g,"_").slice(0,40) || "search";
+  const one = s => s.replace(/\s+/g," ").trim();
+  switch(kind){
+    case "json": return save(`${q}.json`, JSON.stringify(hits,null,2), "application/json");
+    case "csv": {
+      const cols = ["collection","path","ext","modified","representation","section","page","t_start","t_end","text","quote_check","uri"];
+      const rows = hits.map(h => [h.collection,h.path,h.ext,h.modified,h.representation,h.location.section,h.location.page,h.location.t_start,h.location.t_end,one(h.text),h.quote_check,h.uri].map(csvCell).join(","));
+      return save(`${q}.csv`, [cols.join(","), ...rows].join("\r\n"), "text/csv");
+    }
+    case "markdown":
+      return save(`${q}.md`, `# Search: ${$("#q").value}\n\n` + hits.map(h =>
+        `## ${h.rel_path||h.path}${h.location.section?` — ${h.location.section}`:""}\n\n> ${one(h.text)}\n\n[open](${h.uri})\n`).join("\n"));
+    case "citations":
+      return save(`${q}-citations.md`, hits.map((h,i) =>
+        `${i+1}. "${one(h.text).slice(0,300)}" — *${h.rel_path||h.path}*${h.location.section?`, § ${h.location.section}`:""}${h.location.page?`, p. ${h.location.page}`:""} (modified ${h.modified}; ${h.quote_check})`).join("\n"));
+    case "paths": return save(`${q}-files.txt`, [...new Set(hits.map(h=>h.path))].join("\r\n"));
+    case "timestamps":
+      return save(`${q}-timestamps.txt`, hits.map(h => `${h.location.t_start||"?"}  ${one(h.text)}  [${h.rel_path||h.path}]`).join("\n"));
+    case "youtube-links":
+      if(!videoId()){ alert("Enter the YouTube video ID or URL in the options first."); return; }
+      return save(`${q}-youtube.md`, hits.filter(h=>h.location.t_start).map(h => `- [${h.location.t_start}](${ytUrl(h.location.t_start)}) ${one(h.text)}`).join("\n"));
+    case "srt-clips":
+      return save(`${q}.srt`, hits.filter(h=>h.location.t_start).map((h,i) =>
+        `${i+1}\n${h.location.t_start.replace(".",",")} --> ${(h.location.t_end||h.location.t_start).replace(".",",")}\n${h.text.trim()}\n`).join("\n"));
+  }
+}
+
+/* ---------- folder report ---------- */
+let REPORT = null;
+$("#folderForm").onsubmit = async e => {
+  e.preventDefault(); $("#folderSummary").textContent = "Building…"; $("#folderOut").textContent = "";
+  try{
+    REPORT = await api("/api/folder-report", {collection:$("#coll").value, folder:$("#folder").value});
+    $("#folderSummary").textContent = "Report ready."; $("#folderOut").textContent = JSON.stringify(REPORT,null,2);
+  }catch(err){ $("#folderSummary").innerHTML = `<span class="err">${esc(err.message)}</span>`; }
+};
+$("#folderSave").onclick = () => REPORT ? save("folder-report.json", JSON.stringify(REPORT,null,2), "application/json") : alert("Build a report first.");
+
+/* ---------- boot ---------- */
+$("#form").onsubmit = runSearch;
+$("#themeBtn").onclick = () => {
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const cur = document.documentElement.getAttribute("data-theme") || (dark?"dark":"light");
+  document.documentElement.setAttribute("data-theme", cur==="dark"?"light":"dark");
+};
+(async () => {
+  try{
+    const cs = await api("/api/collections");
+    $("#coll").innerHTML = `<option value="">all collections</option>` + cs.map(c =>
+      `<option value="${esc(c.name)}">${esc(c.name)}${c.indexed?"":" (not indexed)"}</option>`).join("");
+  }catch(err){ $("#coll").innerHTML = `<option value="">(server not reachable)</option>`; }
+})();
+buildTabs(); buildMode();
+</script>
+</body>
+</html>

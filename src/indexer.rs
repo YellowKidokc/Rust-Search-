@@ -3,7 +3,7 @@ use crate::{
     parsers::markdown,
     store,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
