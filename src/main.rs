@@ -11,6 +11,7 @@ mod report;
 mod saved;
 mod scan;
 mod search;
+mod serve;
 mod store;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -51,6 +52,14 @@ enum Command {
     Collection(cli::CollectionCmd),
     /// Full-text passage search over one or more collections.
     Search(cli::SearchArgs),
+    /// Serve the search UI on http://127.0.0.1:PORT (loopback only).
+    Serve {
+        #[arg(long, default_value_t = 7878)]
+        port: u16,
+        /// Open the UI in the default browser.
+        #[arg(long)]
+        open: bool,
+    },
     /// Roots (online/offline), file states, failures, recent runs.
     Status {
         #[arg(short, long)]
@@ -234,6 +243,7 @@ fn main() -> Result<()> {
         Command::Repl { index } => repl(index)?,
         Command::Collection(c) => cli::collection(&cfg_path, c)?,
         Command::Search(a) => cli::search(&cfg_path, a)?,
+        Command::Serve { port, open } => serve::run(&cfg_path, port, open)?,
         Command::Status { collection, json } => cli::status(&cfg_path, &collection, json)?,
         Command::Pause { collection } => cli::pause(&cfg_path, &collection, true)?,
         Command::Resume { collection } => cli::pause(&cfg_path, &collection, false)?,
