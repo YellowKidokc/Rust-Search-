@@ -14,7 +14,10 @@ struct Env {
 }
 impl Env {
     fn new() -> Env {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = match std::env::var_os("TPSEARCH_TEST_TMP") {
+            Some(root) => tempfile::tempdir_in(root).unwrap(),
+            None => tempfile::tempdir().unwrap(),
+        };
         let base = dunce::canonicalize(tmp.path()).unwrap();
         Env { _tmp: tmp, base }
     }
