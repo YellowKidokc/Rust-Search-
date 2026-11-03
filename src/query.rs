@@ -2,6 +2,7 @@ use crate::model::{Index, IndexRecord, SearchResult};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Query {
     pub tag: Option<String>,
     pub topic: Option<String>,
@@ -104,13 +105,19 @@ pub fn execute(index: &Index, q: &Query) -> Vec<SearchResult> {
             }
             let mut snippet = String::new();
             if let Some(x) = &q.search {
-                let found = searchable(r).into_iter().find(|(_, v)| has(v, x));
-                if let Some((n, v)) = found {
-                    fields.push(n.into());
-                    snippet = make_snippet(&v, x)
-                } else {
+                let found = searchable(r)
+                    .into_iter()
+                    .filter(|(_, v)| has(v, x))
+                    .collect::<Vec<_>>();
+                if found.is_empty() {
                     return None;
                 }
+                for (name, _) in &found {
+                    if !fields.iter().any(|f| f == name) {
+                        fields.push((*name).into());
+                    }
+                }
+                snippet = make_snippet(&found[0].1, x);
             }
             if q.min_score
                 .is_some_and(|n| r.score_total.unwrap_or(i32::MIN) < n)
@@ -142,6 +149,11 @@ pub fn execute(index: &Index, q: &Query) -> Vec<SearchResult> {
                 record: r.clone(),
                 matched_fields: fields,
                 snippet,
+                index_name: index
+                    .record_indexes
+                    .get(&r.file_path)
+                    .cloned()
+                    .or_else(|| index.name.clone()),
             })
         })
         .collect();

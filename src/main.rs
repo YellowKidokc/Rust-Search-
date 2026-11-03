@@ -9,10 +9,9 @@ mod parsers;
 mod query;
 mod report;
 mod saved;
-mod scan;
-mod search;
-mod serve;
+mod server;
 mod store;
+mod watch;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use model::SearchResult;
@@ -38,6 +37,9 @@ struct Cli {
 enum Command {
     /// Index a collection (`-c NAME`), or legacy: index Markdown paths into <root>/.tpsearch.
     Index {
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(required = true)]
         paths: Vec<PathBuf>,
         #[arg(short, long)]
         collection: Option<String>,
@@ -109,11 +111,31 @@ enum Command {
         #[arg(long)]
         index: Option<PathBuf>,
     },
+    /// List centrally stored named indexes.
+    Indexes,
+    /// Re-index automatically when a supported file changes.
+    Watch {
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        index: Option<PathBuf>,
+    },
+    /// Serve the local browser interface.
+    Serve {
+        #[arg(long, default_value_t = 9800)]
+        port: u16,
+        #[arg(long)]
+        index_name: Option<String>,
+        #[arg(long)]
+        index: Option<PathBuf>,
+    },
 }
 #[derive(Args, Debug, Clone)]
 struct QueryArgs {
     #[arg(long)]
     index: Option<PathBuf>,
+    #[arg(long)]
+    index_name: Option<String>,
     #[arg(long)]
     tag: Option<String>,
     #[arg(long)]
@@ -180,6 +202,8 @@ struct QueryArgs {
     export_manifest: Option<PathBuf>,
     #[arg(long)]
     export_csv: Option<PathBuf>,
+    #[arg(long)]
+    export_snippets: Option<PathBuf>,
 }
 impl QueryArgs {
     fn query(&self) -> Query {
@@ -210,25 +234,11 @@ impl QueryArgs {
         }
     }
 }
-fn main() -> Result<()> {
-    let cli = Cli::parse();
-    let cfg_path = config::config_path(cli.config.as_deref())?;
-    match cli.command {
-        Command::Index {
-            collection: Some(name),
-            dry_run,
-            json,
-            paths,
-        } => {
-            anyhow::ensure!(paths.is_empty(), "use either -c NAME or paths, not both");
-            cli::index(&cfg_path, &name, dry_run, json)?
-        }
-        Command::Index { paths, .. } => {
-            anyhow::ensure!(
-                !paths.is_empty(),
-                "pass -c COLLECTION, or one or more paths for the legacy Markdown index"
-            );
-            let (base, s) = indexer::run(&paths)?;
+#[tokio::main]
+async fn main() -> Result<()> {
+    match Cli::parse().command {
+        Command::Index { paths, name } => {
+            let (base, s) = indexer::run(&paths, name.as_deref())?;
             println!(
                 "Index: {}\nAdded: {}, updated: {}, unchanged: {}, removed: {}, failed: {}",
                 base.join("index.json").display(),
@@ -241,39 +251,42 @@ fn main() -> Result<()> {
         }
         Command::Query(a) => run_query(a)?,
         Command::Repl { index } => repl(index)?,
-        Command::Collection(c) => cli::collection(&cfg_path, c)?,
-        Command::Search(a) => cli::search(&cfg_path, a)?,
-        Command::Serve { port, open } => serve::run(&cfg_path, port, open)?,
-        Command::Status { collection, json } => cli::status(&cfg_path, &collection, json)?,
-        Command::Pause { collection } => cli::pause(&cfg_path, &collection, true)?,
-        Command::Resume { collection } => cli::pause(&cfg_path, &collection, false)?,
-        Command::Watch {
-            collection,
-            interval,
-        } => cli::watch(&cfg_path, &collection, interval)?,
-        Command::Open {
-            collection,
-            passage_id,
-            print,
-        } => cli::open(&cfg_path, &collection, passage_id, print)?,
-        Command::ExportFolder {
-            collection,
-            folder,
-            recursive,
-            out,
-        } => cli::export_folder(&cfg_path, &collection, &folder, recursive, out)?,
+        Command::Indexes => {
+            for i in store::list_named()? {
+                println!(
+                    "{}\t{} records\t{}\t{}",
+                    i.name,
+                    i.record_count,
+                    i.indexed_at.as_deref().unwrap_or("unknown"),
+                    i.roots.join(", ")
+                );
+            }
+        }
+        Command::Watch { name, index } => watch::run(name, index)?,
+        Command::Serve {
+            port,
+            index_name,
+            index,
+        } => server::serve(port, index_name, index).await?,
     }
     Ok(())
 }
 fn run_query(a: QueryArgs) -> Result<()> {
-    let base = store::find_base(a.index.as_deref())?;
+    let base = match a.index_name.as_deref() {
+        Some(n) if n != "all" => store::named_base(n)?,
+        Some(_) => store::home()?,
+        None => store::find_base(a.index.as_deref())?,
+    };
     if a.list_saved {
         for n in saved::list(&base)? {
             println!("{n}")
         }
         return Ok(());
     }
-    let index = store::load(&base)?;
+    let index = match a.index_name.as_deref() {
+        Some(n) => store::load_named(n)?,
+        None => store::load(&base)?,
+    };
     let (mut q, results) = if let Some(name) = &a.load {
         let s = saved::load(&base, name)?;
         let r = if a.frozen {
@@ -309,6 +322,7 @@ fn run_query(a: QueryArgs) -> Result<()> {
         || a.export_to.is_some()
         || a.export_manifest.is_some()
         || a.export_csv.is_some()
+        || a.export_snippets.is_some()
     {
         results.clone()
     } else {
@@ -322,6 +336,9 @@ fn run_query(a: QueryArgs) -> Result<()> {
     }
     if let Some(p) = a.export_csv {
         export::csv(&selected, &p)?
+    }
+    if let Some(p) = a.export_snippets {
+        export::snippets(&selected, &q, &p)?
     }
     Ok(())
 }

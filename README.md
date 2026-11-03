@@ -1,8 +1,6 @@
 # tpsearch — local-first desktop and drive search
 
-`tpsearch` indexes named **collections** of local folders, whole drives and UNC/NAS paths into a
-per-collection SQLite full-text index, and returns **passage-level** results with source locations,
-context, provenance and duplicate handling. Everything runs locally; no AI provider is used or needed.
+`tpsearch` is a fast, local search engine for research documents. It indexes Markdown, text, JSON, YAML, PDF, DOCX, and HTML into an incrementally updated JSON index and provides both a CLI and a local web interface.
 
 Source files are only ever read. tpsearch never renames, moves, deletes or rewrites them, and
 collection indexes live outside the indexed roots.
@@ -112,26 +110,39 @@ for a separate per-folder HTML report generator. tpsearch itself writes no HTML.
 
 ```bash
 tpsearch index /path/to/documents /another/file.md
+tpsearch index --name habermas /path/to/transcripts
 cd /path/to/documents
 tpsearch query --tag resurrection --min-score 70 --min-s07 5
 tpsearch query --search "minimal facts" --sort evd_balance --limit 10
 tpsearch query --domain Theology --has-counter true --json
 tpsearch repl
+tpsearch query --index-name habermas --search "minimal facts"
+tpsearch query --index-name all --tag resurrection
+tpsearch indexes
 ```
 
-This mode keeps its original behaviour: a JSON index in `.tpsearch/index.json` beneath the first root
-(note that this *does* write into the root), Theophysics frontmatter fields (`score_total`, `s01`–`s10`,
-`evd_*`, truth-predicate and definition tables), saved searches (`--save`, `--load`, `--frozen`,
-`--list-saved`) and exports (`--select`, `--export-to`, `--export-manifest`, `--export-csv`, `--flatten`).
-All query filters are AND-combined; sort keys are `score`, `s01`–`s10`, `evd_balance`, `title`, `modified`.
+An unnamed index lives in `.tpsearch/index.json` beneath the first root. Named indexes live in `~/.tpsearch/indexes/<name>/index.json`, or beneath `TPSEARCH_HOME` when that environment variable is set. Indexing again reuses unchanged records, updates changed files, and removes missing ones. Run queries inside an unnamed index root (or an ancestor below it), provide `--index /path/to/.tpsearch/index.json`, or select a named index with `--index-name`.
 
 ## Tests
 
 ```bash
-cargo test
+tpsearch query --tag resurrection --save strong_resurrection
+tpsearch query --list-saved
+tpsearch query --load strong_resurrection
+tpsearch query --load strong_resurrection --frozen
+tpsearch query --tag axiom --select --export-to exports
+tpsearch query --tag axiom --select-all --export-manifest manifest.json
+tpsearch query --tag resurrection --export-csv results.csv
+tpsearch query --search grace --export-snippets grace.md
 ```
 
-`tests/acceptance.rs` drives the binary end to end. It checks keyword search without AI, no
-re-extraction of unchanged files, offline-root retention, copy collapsing and independent-source
-counts, correct source line locations, byte-for-byte unchanged sources, overlapping roots, symlink
-loops, and the legacy commands.
+`--select` accepts comma-separated numbers and ranges such as `1,3,5-8`. Export commands use all displayed results when neither interactive selection nor an explicit result set is otherwise needed. `--flatten` discards source directory structure when copying; by default relative paths beneath an indexed root are preserved.
+
+## Watch mode and web interface
+
+```bash
+tpsearch watch --name habermas
+tpsearch serve --port 9800 --index-name habermas
+```
+
+Watch mode batches filesystem changes for two seconds and refreshes the index. The web interface opens in the default browser and supports search, filters, saved searches, result selection, and file, CSV, snippet, and JSON exports. It binds to localhost only.

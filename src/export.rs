@@ -1,4 +1,7 @@
-use crate::model::SearchResult;
+use crate::{
+    model::{IndexRecord, SearchResult},
+    query::Query,
+};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::{
@@ -131,6 +134,119 @@ pub fn csv(results: &[SearchResult], path: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn snippets(results: &[SearchResult], query: &Query, path: &Path) -> Result<()> {
+    fs::write(path, snippets_markdown(results, query)?)?;
+    Ok(())
+}
+
+pub fn snippets_markdown(results: &[SearchResult], query: &Query) -> Result<String> {
+    let description = query.search.as_deref().unwrap_or("filtered results");
+    let serialized = serde_json::to_string(query)?;
+    let mut out = format!(
+        "# Search Results: {description}\nGenerated: {}\nQuery: `{serialized}`\nResults: {}\n",
+        chrono::Utc::now().to_rfc3339(),
+        results.len()
+    );
+    for (i, result) in results.iter().enumerate() {
+        let r = &result.record;
+        let title = r
+            .title
+            .as_deref()
+            .or(r.clean_title.as_deref())
+            .unwrap_or("Untitled");
+        out.push_str(&format!(
+            "\n---\n\n## {}. {} — Score: {}\n**File:** `{}`\n**Matched in:** {}\n\n{}\n",
+            i + 1,
+            title,
+            r.score_total
+                .map(|x| x.to_string())
+                .unwrap_or_else(|| "-".into()),
+            r.file_path,
+            result.matched_fields.join(", "),
+            extract_snippet(r, &result.matched_fields, query.search.as_deref())
+        ));
+    }
+    Ok(out)
+}
+
+fn extract_snippet(r: &IndexRecord, fields: &[String], search: Option<&str>) -> String {
+    let Some(term) = search else {
+        let mut pieces = vec![];
+        if let Some(x) = &r.one_sentence_finding {
+            pieces.push(format!("**One-sentence finding:** {x}"));
+        }
+        if let Some(x) = r.truth_predicates.first() {
+            pieces.push(truth_row(x));
+        }
+        return if pieces.is_empty() {
+            first_chars(&r.body_text, 500)
+        } else {
+            pieces.join("\n\n")
+        };
+    };
+    let has = |s: &str| s.to_lowercase().contains(&term.to_lowercase());
+    let mut pieces = vec![];
+    if fields.iter().any(|x| x == "truth_predicate") {
+        pieces.extend(
+            r.truth_predicates
+                .iter()
+                .filter(|x| {
+                    has(&format!(
+                        "{} {} {} {} {}",
+                        x.predicate, x.source_role, x.modality, x.formal_form, x.warrant
+                    ))
+                })
+                .map(truth_row),
+        );
+    }
+    if fields.iter().any(|x| x == "definition") {
+        pieces.extend(r.definitions.iter().filter(|x| has(&format!("{} {} {} {}",x.term,x.plain_definition,x.domain,x.first_used_in))).map(|x| format!("| Term | Plain definition | Domain | First used in |\n|---|---|---|---|\n| {} | {} | {} | {} |",x.term,x.plain_definition,x.domain,x.first_used_in)));
+    }
+    for (name, value) in [
+        ("one_sentence_finding", &r.one_sentence_finding),
+        ("governing_question", &r.governing_question),
+    ] {
+        if fields.iter().any(|x| x == name) {
+            if let Some(v) = value {
+                pieces.push(format!("**{}:** {}", name.replace('_', " "), v));
+            }
+        }
+    }
+    if fields.iter().any(|x| x == "frontmatter") {
+        if let Some(map) = r.frontmatter.as_mapping() {
+            for (k, v) in map {
+                let rendered = serde_yaml::to_string(v).unwrap_or_default();
+                if has(&rendered) {
+                    pieces.push(format!(
+                        "```yaml\n{}: {}\n```",
+                        k.as_str().unwrap_or("field"),
+                        rendered.trim()
+                    ));
+                }
+            }
+        }
+    }
+    if fields.iter().any(|x| x == "body") {
+        let paragraphs: Vec<_> = r.body_text.split("\n\n").collect();
+        if let Some(at) = paragraphs.iter().position(|p| has(p)) {
+            pieces.push(
+                paragraphs[at.saturating_sub(1)..=(at + 1).min(paragraphs.len() - 1)].join("\n\n"),
+            );
+        }
+    }
+    if pieces.is_empty() {
+        first_chars(&r.body_text, 500)
+    } else {
+        pieces.join("\n\n")
+    }
+}
+fn truth_row(x: &crate::model::TruthPredicate) -> String {
+    format!("| # | Truth Predicate | Source Role | Modality | Formal form | Warrant |\n|---|---|---|---|---|---|\n| {} | {} | {} | {} | {} | {} |",x.number,x.predicate,x.source_role,x.modality,x.formal_form,x.warrant)
+}
+fn first_chars(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +254,27 @@ mod tests {
     fn selections() {
         assert_eq!(parse_selection("1,3,5-7", 7).unwrap(), vec![0, 2, 4, 5, 6]);
         assert!(parse_selection("0", 2).is_err());
+    }
+
+    #[test]
+    fn paragraph_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.txt");
+        fs::write(&file, "before\n\nneedle here\n\nafter\n\nlast").unwrap();
+        let record = crate::parsers::text::parse(&file).unwrap();
+        let result = SearchResult {
+            record,
+            matched_fields: vec!["body".into()],
+            snippet: String::new(),
+            index_name: None,
+        };
+        let query = Query {
+            search: Some("needle".into()),
+            limit: 20,
+            ..Query::default()
+        };
+        let output = snippets_markdown(&[result], &query).unwrap();
+        assert!(output.contains("before\n\nneedle here\n\nafter"));
+        assert!(!output.contains("\n\nlast\n"));
     }
 }

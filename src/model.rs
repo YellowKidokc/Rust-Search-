@@ -1,9 +1,16 @@
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FileType {
     Markdown,
+    Text,
+    Json,
+    Yaml,
+    Pdf,
+    Docx,
+    Html,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -86,6 +93,12 @@ pub struct IndexRecord {
 pub struct Index {
     pub roots: Vec<String>,
     pub records: Vec<IndexRecord>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub indexed_at: Option<String>,
+    #[serde(default)]
+    pub record_indexes: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,4 +106,6 @@ pub struct SearchResult {
     pub record: IndexRecord,
     pub matched_fields: Vec<String>,
     pub snippet: String,
+    #[serde(default)]
+    pub index_name: Option<String>,
 }
