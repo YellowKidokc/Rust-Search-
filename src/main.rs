@@ -1,8 +1,13 @@
+mod cli;
+mod config;
+mod db;
 mod export;
+mod extract;
 mod indexer;
 mod model;
 mod parsers;
 mod query;
+mod report;
 mod saved;
 mod server;
 mod store;
@@ -22,16 +27,84 @@ use std::{
     about = "Local structured-document search engine"
 )]
 struct Cli {
+    /// Collection settings file (default: per-user config dir, or $TPSEARCH_CONFIG).
+    #[arg(long, global = true)]
+    config: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Index a collection (`-c NAME`), or legacy: index Markdown paths into <root>/.tpsearch.
     Index {
         #[arg(long)]
         name: Option<String>,
         #[arg(required = true)]
         paths: Vec<PathBuf>,
+        #[arg(short, long)]
+        collection: Option<String>,
+        /// Inventory only: show what would be indexed; writes nothing.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Manage named collections and their settings.
+    #[command(subcommand, alias = "col")]
+    Collection(cli::CollectionCmd),
+    /// Full-text passage search over one or more collections.
+    Search(cli::SearchArgs),
+    /// Serve the search UI on http://127.0.0.1:PORT (loopback only).
+    Serve {
+        #[arg(long, default_value_t = 7878)]
+        port: u16,
+        /// Open the UI in the default browser.
+        #[arg(long)]
+        open: bool,
+    },
+    /// Roots (online/offline), file states, failures, recent runs.
+    Status {
+        #[arg(short, long)]
+        collection: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Pause a running index of a collection (workers wait between files).
+    Pause {
+        #[arg(short, long)]
+        collection: String,
+    },
+    Resume {
+        #[arg(short, long)]
+        collection: String,
+    },
+    /// Re-index incrementally every interval (scheduled/watched modes).
+    Watch {
+        #[arg(short, long)]
+        collection: String,
+        /// Minutes; defaults to the collection's interval_minutes.
+        #[arg(long)]
+        interval: Option<u64>,
+    },
+    /// Open the source of a search hit at its location.
+    Open {
+        #[arg(short, long)]
+        collection: String,
+        passage_id: i64,
+        /// Only print the location.
+        #[arg(long)]
+        print: bool,
+    },
+    /// Export the documented folder-report JSON for a folder (or tree).
+    ExportFolder {
+        #[arg(short, long)]
+        collection: String,
+        folder: String,
+        #[arg(long)]
+        recursive: bool,
+        /// File (single folder) or directory (--recursive). Default: stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
     Query(QueryArgs),
     Repl {
@@ -307,6 +380,7 @@ fn repl(index: Option<PathBuf>) -> Result<()> {
         match Cli::try_parse_from(argv) {
             Ok(Cli {
                 command: Command::Query(mut q),
+                ..
             }) => {
                 if q.index.is_none() {
                     q.index = index.clone()

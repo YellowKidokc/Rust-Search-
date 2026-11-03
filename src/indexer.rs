@@ -2,7 +2,7 @@ use crate::{
     model::{Index, IndexRecord},
     parsers, store,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},

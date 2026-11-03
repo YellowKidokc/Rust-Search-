@@ -2,7 +2,7 @@
 name = "tpsearch"
 version = "0.1.0"
 edition = "2021"
-description = "A local search engine for structured Theophysics markdown documents"
+description = "Local-first desktop and drive search: collections, full-text passages, provenance"
 
 [dependencies]
 anyhow = "1"
