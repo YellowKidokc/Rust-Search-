@@ -2,6 +2,7 @@
 //! locations plus flat metadata. Originals are only ever read.
 mod docx;
 mod html;
+mod pdf;
 mod structured;
 mod subtitles;
 mod text;
@@ -123,6 +124,14 @@ static DOCX: Adapter = Adapter {
     run: docx::extract,
 };
 
+static PDF: Adapter = Adapter {
+    name: "pdf",
+    version: 1,
+    loc: LocKind::Paragraph,
+    verifiable_by_lines: false,
+    run: pdf::extract,
+};
+
 pub fn support(ext: &str) -> Support {
     match ext {
         "md" | "markdown" => Support::Adapter(&MARKDOWN),
@@ -138,13 +147,13 @@ pub fn support(ext: &str) -> Support {
         "vtt" => Support::Adapter(&VTT),
         "html" | "htm" | "xhtml" => Support::Adapter(&HTML),
         "docx" => Support::Adapter(&DOCX),
-        "pdf" => Support::Pending("PDF adapter is not in stage 1; text-vs-OCR not yet determined"),
+        "pdf" => Support::Adapter(&PDF),
         _ => Support::Unsupported,
     }
 }
 
 pub fn adapter_by_name(name: &str) -> Option<&'static Adapter> {
-    [&MARKDOWN, &PLAIN, &JSON, &YAML, &SRT, &VTT, &HTML, &DOCX]
+    [&MARKDOWN, &PLAIN, &JSON, &YAML, &SRT, &VTT, &HTML, &DOCX, &PDF]
         .into_iter()
         .find(|a| a.name == name)
 }

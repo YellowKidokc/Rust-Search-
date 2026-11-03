@@ -28,7 +28,7 @@ The legacy commands are preserved unchanged in behaviour (covered by `legacy_mar
 | Offline roots kept, not deleted | done, tested |
 | Loop and overlapping-root protection | done, tested |
 | Adapters: MD, TXT (+code/config), JSON, YAML, SRT, VTT, HTML, DOCX | done (HTML/DOCX are dependency-free extractors: fine for ordinary documents, not for every edge case) |
-| PDF | **not done**; recorded as `pending_adapter` |
+| PDF | done (text extraction; image/scanned PDFs detected and reported, OCR not yet implemented) |
 | Extracted text outside originals; failures/unsupported visible | done (`status`) |
 | JSON/YAML analyses as derived records linked to sources | done when the file declares its source |
 | Keyword, phrase, prefix, exclusion search; filters (collection, path, folder, type, date, metadata, representation) | done |
@@ -43,7 +43,7 @@ The legacy commands are preserved unchanged in behaviour (covered by `legacy_mar
 
 ## Not yet implemented (honest list)
 
-1. **PDF text extraction**, and text-PDF vs OCR detection; optional OCR.
+1. **OCR** for image/scanned PDFs.
 2. **Semantic search** (local embedding model, passage vectors) and **hybrid** lexical+semantic ranking.
 3. **Local AI classification/extraction** and **paid API enrichment** with provider/model/scope/spend
    enforcement and an explicit external-send gate (settings exist; all are rejected today).

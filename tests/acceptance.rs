@@ -196,9 +196,9 @@ fn acceptance() {
         "{st}"
     );
 
-    // Unsupported/pending formats are visible.
+    // A malformed PDF is inventoried as a per-file extraction failure.
     let s = env.json(&["status", "-c", "docs", "--json"]);
-    assert_eq!(s["files_by_status"]["pending_adapter"], 1, "{s}");
+    assert_eq!(s["files_by_status"]["failed"], 1, "{s}");
 
     // Folder report export.
     let rep = env.json(&["export-folder", "-c", "docs", &src.display().to_string()]);
