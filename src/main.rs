@@ -1,10 +1,17 @@
+mod cli;
+mod config;
+mod db;
 mod export;
+mod extract;
 mod indexer;
 mod model;
 mod parsers;
 mod query;
+mod report;
 mod saved;
+mod server;
 mod store;
+mod watch;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use model::SearchResult;
@@ -20,17 +27,105 @@ use std::{
     about = "Local structured-document search engine"
 )]
 struct Cli {
+    /// Collection settings file (default: per-user config dir, or $TPSEARCH_CONFIG).
+    #[arg(long, global = true)]
+    config: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Index a collection (`-c NAME`), or legacy: index Markdown paths into <root>/.tpsearch.
     Index {
+        #[arg(long)]
+        name: Option<String>,
         #[arg(required = true)]
         paths: Vec<PathBuf>,
+        #[arg(short, long)]
+        collection: Option<String>,
+        /// Inventory only: show what would be indexed; writes nothing.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Manage named collections and their settings.
+    #[command(subcommand, alias = "col")]
+    Collection(cli::CollectionCmd),
+    /// Full-text passage search over one or more collections.
+    Search(cli::SearchArgs),
+    /// Serve the search UI on http://127.0.0.1:PORT (loopback only).
+    Serve {
+        #[arg(long, default_value_t = 7878)]
+        port: u16,
+        /// Open the UI in the default browser.
+        #[arg(long)]
+        open: bool,
+    },
+    /// Roots (online/offline), file states, failures, recent runs.
+    Status {
+        #[arg(short, long)]
+        collection: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Pause a running index of a collection (workers wait between files).
+    Pause {
+        #[arg(short, long)]
+        collection: String,
+    },
+    Resume {
+        #[arg(short, long)]
+        collection: String,
+    },
+    /// Re-index incrementally every interval (scheduled/watched modes).
+    Watch {
+        #[arg(short, long)]
+        collection: String,
+        /// Minutes; defaults to the collection's interval_minutes.
+        #[arg(long)]
+        interval: Option<u64>,
+    },
+    /// Open the source of a search hit at its location.
+    Open {
+        #[arg(short, long)]
+        collection: String,
+        passage_id: i64,
+        /// Only print the location.
+        #[arg(long)]
+        print: bool,
+    },
+    /// Export the documented folder-report JSON for a folder (or tree).
+    ExportFolder {
+        #[arg(short, long)]
+        collection: String,
+        folder: String,
+        #[arg(long)]
+        recursive: bool,
+        /// File (single folder) or directory (--recursive). Default: stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
     Query(QueryArgs),
     Repl {
+        #[arg(long)]
+        index: Option<PathBuf>,
+    },
+    /// List centrally stored named indexes.
+    Indexes,
+    /// Re-index automatically when a supported file changes.
+    Watch {
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        index: Option<PathBuf>,
+    },
+    /// Serve the local browser interface.
+    Serve {
+        #[arg(long, default_value_t = 9800)]
+        port: u16,
+        #[arg(long)]
+        index_name: Option<String>,
         #[arg(long)]
         index: Option<PathBuf>,
     },
@@ -39,6 +134,8 @@ enum Command {
 struct QueryArgs {
     #[arg(long)]
     index: Option<PathBuf>,
+    #[arg(long)]
+    index_name: Option<String>,
     #[arg(long)]
     tag: Option<String>,
     #[arg(long)]
@@ -105,6 +202,8 @@ struct QueryArgs {
     export_manifest: Option<PathBuf>,
     #[arg(long)]
     export_csv: Option<PathBuf>,
+    #[arg(long)]
+    export_snippets: Option<PathBuf>,
 }
 impl QueryArgs {
     fn query(&self) -> Query {
@@ -135,10 +234,11 @@ impl QueryArgs {
         }
     }
 }
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     match Cli::parse().command {
-        Command::Index { paths } => {
-            let (base, s) = indexer::run(&paths)?;
+        Command::Index { paths, name } => {
+            let (base, s) = indexer::run(&paths, name.as_deref())?;
             println!(
                 "Index: {}\nAdded: {}, updated: {}, unchanged: {}, removed: {}, failed: {}",
                 base.join("index.json").display(),
@@ -151,18 +251,42 @@ fn main() -> Result<()> {
         }
         Command::Query(a) => run_query(a)?,
         Command::Repl { index } => repl(index)?,
+        Command::Indexes => {
+            for i in store::list_named()? {
+                println!(
+                    "{}\t{} records\t{}\t{}",
+                    i.name,
+                    i.record_count,
+                    i.indexed_at.as_deref().unwrap_or("unknown"),
+                    i.roots.join(", ")
+                );
+            }
+        }
+        Command::Watch { name, index } => watch::run(name, index)?,
+        Command::Serve {
+            port,
+            index_name,
+            index,
+        } => server::serve(port, index_name, index).await?,
     }
     Ok(())
 }
 fn run_query(a: QueryArgs) -> Result<()> {
-    let base = store::find_base(a.index.as_deref())?;
+    let base = match a.index_name.as_deref() {
+        Some(n) if n != "all" => store::named_base(n)?,
+        Some(_) => store::home()?,
+        None => store::find_base(a.index.as_deref())?,
+    };
     if a.list_saved {
         for n in saved::list(&base)? {
             println!("{n}")
         }
         return Ok(());
     }
-    let index = store::load(&base)?;
+    let index = match a.index_name.as_deref() {
+        Some(n) => store::load_named(n)?,
+        None => store::load(&base)?,
+    };
     let (mut q, results) = if let Some(name) = &a.load {
         let s = saved::load(&base, name)?;
         let r = if a.frozen {
@@ -198,6 +322,7 @@ fn run_query(a: QueryArgs) -> Result<()> {
         || a.export_to.is_some()
         || a.export_manifest.is_some()
         || a.export_csv.is_some()
+        || a.export_snippets.is_some()
     {
         results.clone()
     } else {
@@ -211,6 +336,9 @@ fn run_query(a: QueryArgs) -> Result<()> {
     }
     if let Some(p) = a.export_csv {
         export::csv(&selected, &p)?
+    }
+    if let Some(p) = a.export_snippets {
+        export::snippets(&selected, &q, &p)?
     }
     Ok(())
 }
@@ -252,6 +380,7 @@ fn repl(index: Option<PathBuf>) -> Result<()> {
         match Cli::try_parse_from(argv) {
             Ok(Cli {
                 command: Command::Query(mut q),
+                ..
             }) => {
                 if q.index.is_none() {
                     q.index = index.clone()
