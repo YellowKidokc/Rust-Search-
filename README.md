@@ -146,3 +146,38 @@ tpsearch serve --port 9800 --index-name habermas
 ```
 
 Watch mode batches filesystem changes for two seconds and refreshes the index. The web interface opens in the default browser and supports search, filters, saved searches, result selection, and file, CSV, snippet, and JSON exports. It binds to localhost only.
+
+## Collections web interface
+
+```bash
+tpsearch serve -c research --port 9800 --open
+```
+
+This serves the David-OS interface in `ui/search.html`. Choose a collection or search all
+collections; the Status tab shows extraction errors, offline roots, and PDFs needing OCR.
+Use **Preview indexing** for a dry run or **Index collection** for an incremental background job.
+PDF hits show page numbers. Clicking a passage's file name opens its source through `open_with`
+or the operating system's default viewer. The server accepts only loopback, same-origin requests.
+
+`SEARCH.bat` launches this interface on Windows. `SEARCH_CLI.bat` forwards CLI arguments.
+Both use `target\release\tpsearch.exe`; build with `cargo build --release` first.
+
+Collections HTTP endpoints (JSON):
+
+- `GET /api/collections`: names, roots, indexing state, and status summaries.
+- `GET /api/search?q=mercy&collection=research,notes&type=pdf&phrase=false`:
+  CLI-shaped search results, one result object per indexed collection. Other query options are
+  `any`, `path`, `under`, `after`, `before`, `meta=key=value`, `representation`, `limit`,
+  `include_missing`, and `no_verify`. Omit `collection` to use the launch default;
+  pass an empty collection to search all. Commas separate collection names and file types.
+- `POST /api/search`: the existing UI request (`collections`, `query`, `types`, `meta` arrays and
+  the corresponding filter fields); an empty collections array searches all collections.
+- `GET /api/status?collection=research`: CLI status plus `files_by_type` and `pdf_needs_ocr`.
+- `POST /api/index?collection=research&dry_run=true`: start a job. Poll
+  `GET /api/index?collection=research` for `running`, `completed` with CLI-shaped `result`,
+  or `failed` with an `error`. Job state is held in memory and resets when the server restarts.
+- `POST /api/open` with `{"collection":"research","passage_id":123}`: open an indexed source.
+- `POST /api/folder-report` with `collection` and `folder`: folder provenance report.
+
+The Windows cross-build target is `x86_64-pc-windows-gnu` and requires the matching Rust target
+and MinGW GCC. Native Windows tests are still required to validate NTFS and UNC behavior.

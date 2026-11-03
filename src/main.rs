@@ -9,6 +9,9 @@ mod parsers;
 mod query;
 mod report;
 mod saved;
+mod scan;
+mod search;
+mod serve;
 mod server;
 mod store;
 mod watch;
@@ -39,7 +42,7 @@ enum Command {
     Index {
         #[arg(long)]
         name: Option<String>,
-        #[arg(required = true)]
+        #[arg(required_unless_present = "collection")]
         paths: Vec<PathBuf>,
         #[arg(short, long)]
         collection: Option<String>,
@@ -56,7 +59,13 @@ enum Command {
     Search(cli::SearchArgs),
     /// Serve the search UI on http://127.0.0.1:PORT (loopback only).
     Serve {
-        #[arg(long, default_value_t = 7878)]
+        #[arg(short, long)]
+        collection: Option<String>,
+        #[arg(long)]
+        index_name: Option<String>,
+        #[arg(long)]
+        index: Option<PathBuf>,
+        #[arg(long, default_value_t = 9800)]
         port: u16,
         /// Open the UI in the default browser.
         #[arg(long)]
@@ -81,7 +90,11 @@ enum Command {
     /// Re-index incrementally every interval (scheduled/watched modes).
     Watch {
         #[arg(short, long)]
-        collection: String,
+        collection: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        index: Option<PathBuf>,
         /// Minutes; defaults to the collection's interval_minutes.
         #[arg(long)]
         interval: Option<u64>,
@@ -113,22 +126,6 @@ enum Command {
     },
     /// List centrally stored named indexes.
     Indexes,
-    /// Re-index automatically when a supported file changes.
-    Watch {
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        index: Option<PathBuf>,
-    },
-    /// Serve the local browser interface.
-    Serve {
-        #[arg(long, default_value_t = 9800)]
-        port: u16,
-        #[arg(long)]
-        index_name: Option<String>,
-        #[arg(long)]
-        index: Option<PathBuf>,
-    },
 }
 #[derive(Args, Debug, Clone)]
 struct QueryArgs {
@@ -236,8 +233,37 @@ impl QueryArgs {
 }
 #[tokio::main]
 async fn main() -> Result<()> {
-    match Cli::parse().command {
-        Command::Index { paths, name } => {
+    let args = Cli::parse();
+    let cfg_path = config::config_path(args.config.as_deref())?;
+    match args.command {
+        Command::Collection(cmd) => cli::collection(&cfg_path, cmd)?,
+        Command::Search(args) => cli::search(&cfg_path, args)?,
+        Command::Status { collection, json } => cli::status(&cfg_path, &collection, json)?,
+        Command::Pause { collection } => cli::pause(&cfg_path, &collection, true)?,
+        Command::Resume { collection } => cli::pause(&cfg_path, &collection, false)?,
+        Command::Open {
+            collection,
+            passage_id,
+            print,
+        } => cli::open(&cfg_path, &collection, passage_id, print)?,
+        Command::ExportFolder {
+            collection,
+            folder,
+            recursive,
+            out,
+        } => cli::export_folder(&cfg_path, &collection, &folder, recursive, out)?,
+        Command::Index {
+            paths,
+            name,
+            collection,
+            dry_run,
+            json,
+        } => {
+            if let Some(collection) = collection {
+                cli::index(&cfg_path, &collection, dry_run, json)?;
+                return Ok(());
+            }
+            anyhow::ensure!(!dry_run, "--dry-run requires --collection");
             let (base, s) = indexer::run(&paths, name.as_deref())?;
             println!(
                 "Index: {}\nAdded: {}, updated: {}, unchanged: {}, removed: {}, failed: {}",
@@ -262,12 +288,35 @@ async fn main() -> Result<()> {
                 );
             }
         }
-        Command::Watch { name, index } => watch::run(name, index)?,
+        Command::Watch {
+            collection,
+            interval,
+            name,
+            index,
+        } => {
+            if let Some(collection) = collection {
+                cli::watch(&cfg_path, &collection, interval)?;
+            } else {
+                watch::run(name, index)?;
+            }
+        }
         Command::Serve {
             port,
             index_name,
             index,
-        } => server::serve(port, index_name, index).await?,
+            collection,
+            open,
+        } => {
+            if index_name.is_some() || index.is_some() {
+                anyhow::ensure!(
+                    collection.is_none(),
+                    "legacy index and collection cannot be combined"
+                );
+                server::serve(port, index_name, index).await?;
+            } else {
+                serve::run(&cfg_path, port, open, collection).await?;
+            }
+        }
     }
     Ok(())
 }

@@ -115,7 +115,7 @@ fn acceptance() {
 
     let st = env.json(&["index", "-c", "docs", "--json"]);
     assert_eq!(st["files_seen"], 8, "{st}"); // excludes node_modules and hidden
-    assert_eq!(st["failed"], 0);
+    assert_eq!(st["failed"], 1); // The deliberately malformed PDF is a per-file failure.
 
     // Keyword search works with AI disabled (default settings).
     let r = env.json(&["search", "-c", "docs", "grace", "field", "--json"]);

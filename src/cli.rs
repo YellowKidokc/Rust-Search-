@@ -593,6 +593,27 @@ pub fn watch(cfg_path: &Path, name: &str, interval: Option<u64>) -> Result<()> {
     }
 }
 
+fn viewer_program(program: &str) -> std::ffi::OsString {
+    #[cfg(windows)]
+    {
+        // Windows editor launchers (including VS Code) may be .cmd files.
+        let path = Path::new(program);
+        if path.extension().is_none() {
+            if let Some(paths) = std::env::var_os("PATH") {
+                for dir in std::env::split_paths(&paths) {
+                    for ext in ["exe", "com", "cmd", "bat"] {
+                        let candidate = dir.join(program).with_extension(ext);
+                        if candidate.is_file() {
+                            return candidate.into_os_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    program.into()
+}
+
 pub fn open(cfg_path: &Path, name: &str, passage: i64, print: bool) -> Result<()> {
     let cfg = load(cfg_path)?;
     let c = cfg.get(name)?;
@@ -628,7 +649,8 @@ pub fn open(cfg_path: &Path, name: &str, passage: i64, print: bool) -> Result<()
                         .replace("{line}", &line.to_string())
                 })
                 .collect();
-            let mut cmd = std::process::Command::new(&parts[0]);
+            anyhow::ensure!(!parts.is_empty(), "open_with must name a program");
+            let mut cmd = std::process::Command::new(viewer_program(&parts[0]));
             cmd.args(&parts[1..]);
             cmd
         }
@@ -696,4 +718,15 @@ pub fn export_folder(
         None => println!("{s}"),
     }
     Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    #[test]
+    fn offline_unc_root_keeps_its_prefix() {
+        let unc = Path::new(r"\\tpsearch-invalid-host\share\papers");
+        assert_eq!(root_path(unc), unc);
+        assert!(root_path(unc).is_absolute());
+    }
 }

@@ -62,6 +62,7 @@ impl Adapter {
 pub enum Support {
     Adapter(&'static Adapter),
     /// A planned adapter that this stage does not include.
+    #[allow(dead_code)] // Reserved for future adapters.
     Pending(&'static str),
     /// Inventoried by name and metadata only.
     Unsupported,

@@ -54,8 +54,24 @@ The legacy commands are preserved unchanged in behaviour (covered by `legacy_mar
 6. **Versions and summaries as representations**: only original / copy / transcript / derived exist.
    Near-duplicate (non-identical) detection is not implemented.
 7. **Real-time filesystem watching** (`notify`/ReadDirectoryChangesW); `watch` polls.
-8. **A desktop GUI.** Stage 1 is a CLI with JSON output suitable for a UI to call.
-9. Page numbers (PDF) and DOCX page mapping; DOCX locations are paragraph numbers.
+8. **A native desktop GUI.** The collections web interface runs locally in a browser.
+9. DOCX page mapping; DOCX locations are paragraph numbers. PDF passages include page numbers.
 10. Cross-collection ranking: BM25 scores from different collections are not strictly comparable.
-11. Verified on Linux. The Windows code type-checks for `x86_64-pc-windows-gnu`, but it has
-    **not been built and run on Windows** (hidden attributes, junction handling, UNC paths, `explorer.exe` open).
+11. Verified on Linux; the Windows GNU release executable cross-builds on Linux. Native Windows
+    execution remains unverified (hidden attributes, junction handling, UNC paths, desktop viewers).
+
+## Stage 2: Windows build and collections web UI
+
+- Repaired the merged CLI command wiring and restored the dependencies already used by the
+  collection implementation. Legacy `query`, `watch --name`, and `serve --index-name` remain available.
+- `tpsearch serve -c research --port 9800` serves the newer David-OS interface from
+  `ui/search.html`. Add `--open` to launch the browser. It binds only to `127.0.0.1`.
+- Collection search supports multiple collections, phrase/prefix/exclusion queries and the CLI
+  filters. The interface includes collection health, OCR-needed PDF counts, background indexing
+  and dry-run previews. PDF results show their page number alongside their section heading.
+- Windows hidden attributes are detected; reparse points are skipped when links are disabled.
+  Canonical directory identities prevent junction loops when links are followed. Offline UNC
+  roots are preserved. Editor launchers such as `code.cmd` are resolved from PATH on Windows.
+- `SEARCH.bat` starts the web UI; `SEARCH_CLI.bat` forwards arguments to the release binary.
+- Windows-specific hidden-attribute, junction-loop and UNC tests require a native Windows runner.
+  Cross-compilation does not verify actual NTFS, network-share, or desktop-viewer behavior.

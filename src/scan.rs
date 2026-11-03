@@ -89,6 +89,20 @@ fn hidden_attr(_: &fs::Metadata) -> bool {
     false
 }
 
+#[cfg(windows)]
+fn reparse_point(m: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    m.file_attributes() & 0x400 != 0
+}
+#[cfg(not(windows))]
+fn reparse_point(_: &fs::Metadata) -> bool {
+    false
+}
+
+fn is_link(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink() || reparse_point(&m))
+}
+
 fn root_state(cfg: &Collection) -> Vec<RootState> {
     let mut out: Vec<RootState> = vec![];
     for r in &cfg.roots {
@@ -164,7 +178,11 @@ pub fn inventory(cfg: &Collection, index_dir: &Path) -> Result<Inventory> {
                 .collect::<Vec<_>>()
                 .join("/")
         };
-        let mut skipped = (0u64, 0u64);
+        let mut skipped = (0u64, 0u64, 0u64);
+        let mut visited_dirs = std::collections::HashSet::from([
+            dunce::canonicalize(&root).unwrap_or_else(|_| root.clone())
+        ]);
+        let mut junction_loops = Vec::new();
         let walker = WalkDir::new(&root)
             .follow_links(cfg.follow_symlinks)
             .into_iter()
@@ -173,6 +191,10 @@ pub fn inventory(cfg: &Collection, index_dir: &Path) -> Result<Inventory> {
                     return true;
                 }
                 let p = e.path();
+                if !cfg.follow_symlinks && is_link(p) {
+                    skipped.2 += 1;
+                    return false;
+                }
                 if e.file_type().is_dir() && (nested.contains(p) || p == index_canon) {
                     return false;
                 }
@@ -187,7 +209,20 @@ pub fn inventory(cfg: &Collection, index_dir: &Path) -> Result<Inventory> {
                 } else if hidden {
                     skipped.1 += 1;
                 }
-                !excluded && !hidden
+                if excluded || hidden {
+                    return false;
+                }
+                // Junctions can appear as directories rather than symbolic links.
+                // Canonical directory identities prevent revisiting either kind.
+                if cfg.follow_symlinks && e.file_type().is_dir() {
+                    if let Ok(canonical) = dunce::canonicalize(p) {
+                        if !visited_dirs.insert(canonical) {
+                            junction_loops.push(p.display().to_string());
+                            return false;
+                        }
+                    }
+                }
+                true
             });
         for entry in walker {
             let e = match entry {
@@ -205,7 +240,7 @@ pub fn inventory(cfg: &Collection, index_dir: &Path) -> Result<Inventory> {
                     continue;
                 }
             };
-            if e.path_is_symlink() && !cfg.follow_symlinks {
+            if is_link(e.path()) && !cfg.follow_symlinks {
                 inv.symlinks_skipped += 1;
                 continue;
             }
@@ -260,6 +295,8 @@ pub fn inventory(cfg: &Collection, index_dir: &Path) -> Result<Inventory> {
         }
         inv.excluded += skipped.0;
         inv.hidden_skipped += skipped.1;
+        inv.symlinks_skipped += skipped.2;
+        inv.loops.extend(junction_loops);
     }
     Ok(inv)
 }
@@ -799,5 +836,66 @@ pub fn ext_action(ext: &str, cfg: &Collection) -> &'static str {
         Support::Adapter(_) => "extract text",
         Support::Pending(_) => "pending adapter (metadata only)",
         Support::Unsupported => "metadata only",
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use std::process::Command;
+
+    #[test]
+    fn windows_hidden_attribute_is_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("not-a-dotfile.txt");
+        fs::write(&file, "hidden by Windows attribute").unwrap();
+        assert!(!hidden_attr(&fs::metadata(&file).unwrap()));
+        assert!(Command::new("attrib")
+            .arg("+H")
+            .arg(&file)
+            .status()
+            .unwrap()
+            .success());
+        assert!(hidden_attr(&fs::metadata(&file).unwrap()));
+        assert!(Command::new("attrib")
+            .arg("-H")
+            .arg(&file)
+            .status()
+            .unwrap()
+            .success());
+    }
+
+    #[test]
+    fn junction_detection_and_loop_prevention() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("docs");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("note.txt"), "junction test").unwrap();
+        let junction = root.join("loop");
+        assert!(Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&root)
+            .status()
+            .unwrap()
+            .success());
+        assert!(is_link(&junction));
+        assert!(reparse_point(&fs::symlink_metadata(&junction).unwrap()));
+        let mut cfg = Collection {
+            roots: vec![crate::config::Root {
+                path: root,
+                depth: None,
+            }],
+            ..Default::default()
+        };
+        let inventory_default = inventory(&cfg, &tmp.path().join("index")).unwrap();
+        assert_eq!(inventory_default.candidates.len(), 1);
+        assert!(inventory_default.symlinks_skipped > 0);
+        cfg.follow_symlinks = true;
+        let followed = inventory(&cfg, &tmp.path().join("index")).unwrap();
+        assert_eq!(followed.candidates.len(), 1);
+        assert!(!followed.loops.is_empty());
+        // Remove only the junction itself, never traverse it during test cleanup.
+        fs::remove_dir(junction).unwrap();
     }
 }

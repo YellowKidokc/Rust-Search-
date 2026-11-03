@@ -24,6 +24,14 @@ tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.5", features = ["cors"] }
 zip = "2"
 
+# Existing collection implementation prerequisites (missing from the merged manifest).
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
+globset = "0.4"
+dunce = "1"
+toml = "0.8"
+dirs = "5"
+
 [dev-dependencies]
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
