@@ -84,6 +84,14 @@ pub struct Root {
     pub depth: Option<Depth>,
 }
 
+/// A local embedding service; independent of the reserved AI enrichment settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EmbeddingSettings {
+    pub model: String,
+    pub api_url: String,
+    pub dims: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Collection {
@@ -114,6 +122,8 @@ pub struct Collection {
     pub profiles: Vec<String>,
     /// Command template for opening a location, e.g. `code -g {path}:{line}`.
     pub open_with: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding: Option<EmbeddingSettings>,
 }
 impl Default for Collection {
     fn default() -> Self {
@@ -134,6 +144,7 @@ impl Default for Collection {
             ai: Ai::default(),
             profiles: vec![],
             open_with: None,
+            embedding: None,
         }
     }
 }

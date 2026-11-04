@@ -31,6 +31,7 @@ globset = "0.4"
 dunce = "1"
 toml = "0.8"
 dirs = "5"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 
 [dev-dependencies]
 tempfile = "3"

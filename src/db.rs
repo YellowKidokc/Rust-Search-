@@ -55,6 +55,47 @@ CREATE TABLE IF NOT EXISTS passages(
   page INTEGER
 );
 CREATE INDEX IF NOT EXISTS passages_file ON passages(file_id, ord);
+CREATE TABLE IF NOT EXISTS passage_embeddings (
+    file_id INTEGER NOT NULL REFERENCES files(id),
+    passage_idx INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    embedding BLOB NOT NULL,
+    dims INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (file_id, passage_idx, model)
+);
+CREATE TABLE IF NOT EXISTS passage_embedding_models (
+    model TEXT PRIMARY KEY,
+    api_url TEXT NOT NULL,
+    dims INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS passage_embedding_ivf_centroids (
+    model TEXT NOT NULL, cluster INTEGER NOT NULL, centroid BLOB NOT NULL, dims INTEGER NOT NULL,
+    PRIMARY KEY(model,cluster)
+);
+CREATE TABLE IF NOT EXISTS passage_embedding_ivf_members (
+    model TEXT NOT NULL, file_id INTEGER NOT NULL, passage_idx INTEGER NOT NULL, cluster INTEGER NOT NULL,
+    PRIMARY KEY(model,file_id,passage_idx)
+);
+CREATE INDEX IF NOT EXISTS embedding_ivf_cluster ON passage_embedding_ivf_members(model,cluster);
+CREATE TRIGGER IF NOT EXISTS invalidate_ivf_insert AFTER INSERT ON passage_embeddings BEGIN
+    DELETE FROM passage_embedding_ivf_centroids WHERE model=NEW.model;
+END;
+CREATE TRIGGER IF NOT EXISTS invalidate_ivf_update AFTER UPDATE ON passage_embeddings BEGIN
+    DELETE FROM passage_embedding_ivf_centroids WHERE model=OLD.model OR model=NEW.model;
+END;
+CREATE TRIGGER IF NOT EXISTS invalidate_ivf_delete AFTER DELETE ON passage_embeddings BEGIN
+    DELETE FROM passage_embedding_ivf_centroids WHERE model=OLD.model;
+END;
+CREATE TRIGGER IF NOT EXISTS invalidate_passage_embedding
+AFTER DELETE ON passages BEGIN
+    DELETE FROM passage_embeddings WHERE file_id=OLD.file_id AND passage_idx=OLD.ord;
+END;
+CREATE TRIGGER IF NOT EXISTS delete_file_embeddings
+AFTER DELETE ON files BEGIN
+    DELETE FROM passage_embeddings WHERE file_id=OLD.id;
+END;
+
 CREATE VIRTUAL TABLE IF NOT EXISTS passages_fts USING fts5(text, section, tokenize='unicode61 remove_diacritics 2');
 CREATE VIRTUAL TABLE IF NOT EXISTS names_fts USING fts5(name, rel_path, tokenize='unicode61 remove_diacritics 2');
 CREATE TABLE IF NOT EXISTS meta(

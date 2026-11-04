@@ -520,6 +520,7 @@ pub fn status(cfg_path: &Path, name: &str, json: bool) -> Result<()> {
             .join(", ")
     );
     println!("Passages: {}", s.passages);
+    println!("PDFs needing OCR: {}", s.pdf_needs_ocr);
     if !s.not_extracted_by_ext.is_empty() {
         println!("Not extracted (inventoried only):");
         for x in &s.not_extracted_by_ext {

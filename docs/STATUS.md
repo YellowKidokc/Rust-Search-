@@ -24,11 +24,12 @@ The legacy commands are preserved unchanged in behaviour (covered by `legacy_mar
 | Manual / scheduled / watched | manual; `watch` = incremental re-index on an interval; Task Scheduler recipe documented. **No filesystem-event watcher.** |
 | Concurrency limit, throttle, pause/resume | done (`threads`, `throttle_ms`, `pause`/`resume`) |
 | Index storage location | done (`index_dir`; default per-user data dir) |
-| Analysis depth per collection/root | names / text / metadata selectable; semantic and AI flags exist and are **rejected** |
+| Analysis depth per collection/root | names / text / metadata selectable; automatic semantic and AI scan flags remain **rejected**; explicit semantic commands are available |
 | Offline roots kept, not deleted | done, tested |
 | Loop and overlapping-root protection | done, tested |
 | Adapters: MD, TXT (+code/config), JSON, YAML, SRT, VTT, HTML, DOCX | done (HTML/DOCX are dependency-free extractors: fine for ordinary documents, not for every edge case) |
 | PDF | done (text extraction; image/scanned PDFs detected and reported, OCR not yet implemented) |
+| Semantic search | done (local embedding API, passage vectors, cosine similarity ranking; hybrid search remains a stretch goal) |
 | Extracted text outside originals; failures/unsupported visible | done (`status`) |
 | JSON/YAML analyses as derived records linked to sources | done when the file declares its source |
 | Keyword, phrase, prefix, exclusion search; filters (collection, path, folder, type, date, metadata, representation) | done |
@@ -44,7 +45,7 @@ The legacy commands are preserved unchanged in behaviour (covered by `legacy_mar
 ## Not yet implemented (honest list)
 
 1. **OCR** for image/scanned PDFs.
-2. **Semantic search** (local embedding model, passage vectors) and **hybrid** lexical+semantic ranking.
+2. **Hybrid** lexical+semantic ranking. Explicit local-API semantic search and optional IVF acceleration are implemented.
 3. **Local AI classification/extraction** and **paid API enrichment** with provider/model/scope/spend
    enforcement and an explicit external-send gate (settings exist; all are rejected today).
 4. **Metadata profiles** (research, arguments, transcripts, code, general), multiple classifications
@@ -75,3 +76,26 @@ The legacy commands are preserved unchanged in behaviour (covered by `legacy_mar
 - `SEARCH.bat` starts the web UI; `SEARCH_CLI.bat` forwards arguments to the release binary.
 - Windows-specific hidden-attribute, junction-loop and UNC tests require a native Windows runner.
   Cross-compilation does not verify actual NTFS, network-share, or desktop-viewer behavior.
+
+
+## Stage 3: PDF and semantic search foundation
+
+- Existing page-aware PDF adapter and fixtures are retained. Both CLI and web status expose the
+  number of PDFs needing OCR; OCR is not implemented.
+- `embed` stores little-endian f32 passage vectors by file, paragraph index and model. Additive
+  tables and delete triggers keep stale passage vectors out of search without altering FTS5.
+- `semantic` embeds the query locally and ranks indexed passages by cosine similarity, with
+  file paths, page/paragraph/line locations, headings, thresholds and JSON output.
+- ONNX Runtime 2.0.0-rc.15 failed its Windows GNU build probe: no prebuilt binaries for
+  `x86_64-pc-windows-gnu`. This build uses the allowed local Ollama/OpenAI-compatible API fallback,
+  defaulting to `nomic-embed-text`. Model downloads/caching belong to the local service.
+- Deterministic integration tests cover 384-dimensional vectors, rerun skips with zero inference
+  calls (also with the service stopped), model changes, failed batches, response ordering,
+  changed/missing files and additive migration. They do not validate actual model quality.
+- Optional `semantic --index` builds/reuses a CPU spherical-k-means IVF index in separate
+  SQLite tables. It uses approximate candidate selection and is invalidated when vectors change.
+- Bundled inference, `--model-path`, and hybrid RRF search are not included.
+- Validation: 35 Linux tests pass; Linux and Windows GNU release builds complete without warnings;
+  Windows test binaries cross-compile. A release smoke test confirms searchable PDF page 2,
+  one image-only PDF needing OCR, and embedding dry-run without a service. Native Windows and
+  actual model-quality validation were not performed.

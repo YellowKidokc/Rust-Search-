@@ -181,3 +181,63 @@ Collections HTTP endpoints (JSON):
 
 The Windows cross-build target is `x86_64-pc-windows-gnu` and requires the matching Rust target
 and MinGW GCC. Native Windows tests are still required to validate NTFS and UNC behavior.
+
+## Local semantic search (Stage 3)
+
+Semantic search uses a **local embedding service**. It does not call a paid API and does not
+change FTS5 keyword search. ONNX Runtime's default package does not provide binaries for the
+Windows GNU target used here, so this build uses the local-API fallback rather than bundling
+inference. The service manages model files, downloads, and caching.
+
+Install [Ollama](https://ollama.com), then prepare a CPU-only embedding service:
+
+```bash
+# In one terminal (set OLLAMA_NUM_GPU=0 in your Windows environment settings instead).
+OLLAMA_NUM_GPU=0 ollama serve
+# In another terminal:
+ollama pull nomic-embed-text
+
+tpsearch index -c research
+tpsearch embed -c research --dry-run
+tpsearch embed -c research --api-url http://localhost:11434 --model nomic-embed-text --batch-size 32
+tpsearch semantic -c research "quantum error correction" --top 10 --threshold 0.3
+```
+
+`nomic-embed-text` is the fallback default. Vector dimensions are validated against the service
+response and saved with the model; they are not hardcoded to MiniLM's 384 dimensions.
+Ollama requests disable GPU use and text truncation. For any other local service, configure its
+CPU provider yourself. No GPU is required by tpsearch.
+
+A local OpenAI-compatible service is also supported (this is a protocol, not a paid provider):
+
+```bash
+# Start your CPU service with all-MiniLM-L6-v2 installed under this model alias first.
+tpsearch embed -c research --api-url http://127.0.0.1:8080/v1/embeddings --model all-MiniLM-L6-v2
+tpsearch semantic -c research "quantum error correction" --json
+```
+
+Only plain HTTP on loopback (`localhost`, `127.0.0.1`, or `::1`) is accepted. Redirects and
+remote/paid endpoints are rejected. Source passages are sent only to that selected local
+service. `--model-path` and bundled model downloading are not used in this fallback; configure
+local model files in your inference service. Different model names keep independent vectors.
+Treat model aliases as immutable: if weights change, choose a new alias and re-embed. The same
+alias cannot silently switch endpoints or vector dimensions.
+
+The model, endpoint and dimension count are saved in the collection's `embedding` settings
+when embedding completes successfully. Subsequent `embed`/`semantic` commands reuse them.
+Already embedded passages are skipped; with no changes, `embed` makes **zero inference calls**
+and works with the service stopped. Re-indexing invalidates embeddings for changed passages;
+missing files are excluded from semantic results. Existing index databases gain the new tables
+and invalidation triggers automatically; existing tables and FTS5 logic are unchanged.
+
+Use `--json` for embedding counts/errors or ranked semantic results. Failed batches return a
+nonzero exit status; successful batches remain stored so a retry can resume. A failed model
+change does not replace the active collection model. `--dry-run` reports pending passages
+without inference or changing collection settings. Ranking uses brute-force cosine similarity;
+thresholds are between -1 and 1. For larger collections, `tpsearch semantic -c research "query" --index` builds/reuses an
+optional IVF index (spherical k-means, stored in separate SQLite tables). Changed embeddings
+invalidate it automatically. Candidate selection is approximate; omit `--index` for exhaustive
+cosine ranking. Hybrid RRF search remains a stretch goal and is not implemented.
+
+Tests use a deterministic local HTTP fixture (including 384-dimensional responses) to check
+API handling, ordering, persistence and invalidation. They do not measure real model quality.

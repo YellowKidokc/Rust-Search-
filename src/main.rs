@@ -11,6 +11,7 @@ mod report;
 mod saved;
 mod scan;
 mod search;
+mod semantic;
 mod serve;
 mod server;
 mod store;
@@ -57,6 +58,10 @@ enum Command {
     Collection(cli::CollectionCmd),
     /// Full-text passage search over one or more collections.
     Search(cli::SearchArgs),
+    /// Generate passage vectors with a local CPU embedding service.
+    Embed(semantic::EmbedArgs),
+    /// Rank collection passages by cosine similarity to a query.
+    Semantic(semantic::SemanticArgs),
     /// Serve the search UI on http://127.0.0.1:PORT (loopback only).
     Serve {
         #[arg(short, long)]
@@ -238,6 +243,12 @@ async fn main() -> Result<()> {
     match args.command {
         Command::Collection(cmd) => cli::collection(&cfg_path, cmd)?,
         Command::Search(args) => cli::search(&cfg_path, args)?,
+        Command::Embed(args) => {
+            tokio::task::spawn_blocking(move || semantic::embed(&cfg_path, args)).await??
+        }
+        Command::Semantic(args) => {
+            tokio::task::spawn_blocking(move || semantic::search(&cfg_path, args)).await??
+        }
         Command::Status { collection, json } => cli::status(&cfg_path, &collection, json)?,
         Command::Pause { collection } => cli::pause(&cfg_path, &collection, true)?,
         Command::Resume { collection } => cli::pause(&cfg_path, &collection, false)?,
