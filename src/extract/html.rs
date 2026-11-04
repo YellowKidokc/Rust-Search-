@@ -36,7 +36,8 @@ pub fn entities(s: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         rest = &rest[i..];
-        let end = rest[..rest.len().min(12)].find(';');
+        let lim = (0..=rest.len().min(12)).rev().find(|&i| rest.is_char_boundary(i)).unwrap_or(0);
+        let end = rest[..lim].find(';');
         let decoded = end.and_then(|e| {
             let name = &rest[1..e];
             let c = match name {
